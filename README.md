@@ -44,7 +44,7 @@ start.bat
 java '-Dfile.encoding=UTF-8' -jar target\agent-hello-world-1.0-SNAPSHOT-all.jar --directory "D:\AgentWorkspace"
 ```
 
-命令行启动脚本会优先读取 `PERSONAL_ASSISTANT_DIRECTORY`；未配置时由程序交互询问目录。
+命令行和便携版程序都会优先读取 `PERSONAL_ASSISTANT_DIRECTORY`；未配置时由程序交互询问目录。交互输入成功后，程序会将目录保存到当前 Windows 用户环境变量，后续启动无需重复输入。环境变量只对新启动的进程生效，保存后请重新打开命令行窗口。
 
 `--directory` 是必需的安全边界，所有文件和目录操作只能发生在该目录及其子目录中。目录必须预先存在。
 
@@ -70,7 +70,8 @@ java '-Dfile.encoding=UTF-8' -jar target\agent-hello-world-1.0-SNAPSHOT-all.jar
 
 ```text
 :help       查看帮助
-:directory  查看当前目录边界说明
+:directory                  查看当前目录边界说明
+:directory <新目录>         切换当前会话目录并保存到用户环境变量
 :exit       退出
 :quit       退出
 ```
@@ -94,7 +95,7 @@ java '-Dfile.encoding=UTF-8' -jar target\agent-hello-world-1.0-SNAPSHOT-all.jar
 
 ## 当前演示版边界
 
-- 只允许操作启动时指定的一个目录。
+- 每个助手实例只允许操作一个目录；可通过 `:directory <新目录>` 重新创建当前会话的设备 Agent 并切换边界。
 - 文件操作由 Java NIO 完成。
 - 程序启动使用 `ProcessBuilder`，不经过 Shell 拼接。
 - 关闭程序只允许关闭当前工具实例启动且仍被跟踪的进程。
@@ -104,9 +105,8 @@ java '-Dfile.encoding=UTF-8' -jar target\agent-hello-world-1.0-SNAPSHOT-all.jar
 
 ## GitHub Actions Windows 构建
 
-仓库中的 `.github/workflows/build-windows-exe.yml` 会在 Windows Runner 上自动执行测试、构建 fat jar，并生成：
+仓库中的 `.github/workflows/build-windows-exe.yml` 会在 Windows Runner 上跳过单元测试执行、构建 fat jar，并生成：
 
 - `PersonalAssistant-portable.zip`：包含运行时的便携版程序目录；
-- `PersonalAssistant-*.exe`：Windows 安装包。
 
-推送到 `main` 分支或手动执行 GitHub Actions 后，可以在对应工作流的 Artifacts 中下载构建产物。构建过程不需要 API Key，运行程序时再通过初始化脚本配置。
+推送到 `main` 分支或手动执行 GitHub Actions 后，可以在对应工作流的 Artifacts 中下载便携版。构建过程不需要 API Key，运行程序时再通过初始化脚本配置。

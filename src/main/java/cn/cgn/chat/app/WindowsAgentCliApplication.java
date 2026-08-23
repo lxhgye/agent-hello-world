@@ -5,6 +5,7 @@ import cn.cgn.chat.service.gAIAgentic.PersonalAssistantAgent;
 import java.io.Console;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -12,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Scanner;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -30,6 +32,7 @@ public final class WindowsAgentCliApplication {
     private static final String QUIT_COMMAND = ":quit";
     private static final String HELP_COMMAND = ":help";
     private static final String DIRECTORY_COMMAND = ":directory";
+    private static final String DIRECTORY_ENVIRONMENT_VARIABLE = "PERSONAL_ASSISTANT_DIRECTORY";
     private static final String PROMPT = "copilot> ";
     private static final String PLAN_STREAM_PREFIX = "\u0000P";
     private static final String ANSWER_START_PREFIX = "\u0000S";
@@ -85,9 +88,7 @@ public final class WindowsAgentCliApplication {
             printInfo("当前目录权限：" + allowedDirectory);
             printInfo("输入 :help 查看帮助，输入 :exit 或 :quit 退出。");
 
-            PersonalAssistantAgent agent = new PersonalAssistantAgent(allowedDirectory,
-                    WindowsAgentCliApplication::printProgress);
-            runInteractiveLoop(agent);
+            runInteractiveLoop(allowedDirectory);
         } finally {
             AnsiConsole.systemUninstall();
         }
@@ -119,7 +120,9 @@ public final class WindowsAgentCliApplication {
         }
     }
 
-    private static void runInteractiveLoop(PersonalAssistantAgent agent) {
+    private static void runInteractiveLoop(Path initialDirectory) {
+        Path currentDirectory = initialDirectory;
+        PersonalAssistantAgent agent = createAgent(currentDirectory);
         try (Scanner scanner = new Scanner(System.in, consoleCharset)) {
             while (true) {
                 System.out.print(colorize(PROMPT, ANSI_BLUE));
@@ -141,12 +144,37 @@ public final class WindowsAgentCliApplication {
                     continue;
                 }
                 if (DIRECTORY_COMMAND.equalsIgnoreCase(instruction)) {
-                    printInfo("当前允许目录由本次启动时确定，不能在会话中动态切换。");
+                    printInfo("当前允许目录：" + currentDirectory);
+                    continue;
+                }
+                if (isDirectoryChangeCommand(instruction)) {
+                    String requestedDirectory = instruction.substring(DIRECTORY_COMMAND.length()).trim();
+                    if (requestedDirectory.isEmpty()) {
+                        printError("用法：:directory <新的目录绝对路径>");
+                        continue;
+                    }
+                    Path newDirectory = validateDirectory(requestedDirectory);
+                    if (newDirectory != null) {
+                        persistDirectory(newDirectory);
+                        currentDirectory = newDirectory;
+                        agent = createAgent(currentDirectory);
+                        printInfo("允许目录已切换并保存：" + currentDirectory);
+                    }
                     continue;
                 }
                 executeInstruction(agent, instruction);
             }
         }
+    }
+
+    private static PersonalAssistantAgent createAgent(Path directory) {
+        return new PersonalAssistantAgent(directory, WindowsAgentCliApplication::printProgress);
+    }
+
+    private static boolean isDirectoryChangeCommand(String instruction) {
+        return instruction.length() > DIRECTORY_COMMAND.length()
+                && instruction.regionMatches(true, 0, DIRECTORY_COMMAND, 0, DIRECTORY_COMMAND.length())
+                && Character.isWhitespace(instruction.charAt(DIRECTORY_COMMAND.length()));
     }
 
     private static void executeInstruction(PersonalAssistantAgent agent, String instruction) {
@@ -179,21 +207,39 @@ public final class WindowsAgentCliApplication {
             return validateDirectory(commandLineDirectory);
         }
 
+        String configuredDirectory = System.getenv(DIRECTORY_ENVIRONMENT_VARIABLE);
+        if (configuredDirectory != null && !configuredDirectory.isBlank()) {
+            Path directory = validateDirectory(configuredDirectory);
+            if (directory != null) {
+                return directory;
+            }
+            printInfo("已配置的允许目录无效，将重新询问目录。");
+        }
+
         Console console = System.console();
         if (console == null) {
-            printError("当前没有可交互控制台，请使用 --directory <目录> 启动。");
+            printError("当前没有可交互控制台，请配置 PERSONAL_ASSISTANT_DIRECTORY 或使用 --directory <目录> 启动。");
             return null;
         }
         String input = console.readLine("请输入允许操作的目录绝对路径：");
         if (input == null || input.isBlank()) {
             return null;
         }
-        return validateDirectory(input.trim());
+        Path directory = validateDirectory(input.trim());
+        if (directory != null) {
+            persistDirectory(directory);
+        }
+        return directory;
     }
 
     private static Path validateDirectory(String rawDirectory) {
         try {
-            Path directory = Path.of(rawDirectory).toAbsolutePath().normalize().toRealPath();
+            String normalizedInput = rawDirectory.trim();
+            if (normalizedInput.length() >= 2 && normalizedInput.startsWith("\"")
+                    && normalizedInput.endsWith("\"")) {
+                normalizedInput = normalizedInput.substring(1, normalizedInput.length() - 1);
+            }
+            Path directory = Path.of(normalizedInput).toAbsolutePath().normalize().toRealPath();
             if (!Files.isDirectory(directory)) {
                 throw new IllegalArgumentException("路径不是目录：" + directory);
             }
@@ -201,6 +247,38 @@ public final class WindowsAgentCliApplication {
         } catch (Exception exception) {
             printError("允许操作目录无效：" + safeMessage(exception));
             return null;
+        }
+    }
+
+    /**
+     * 保存允许目录到当前 Windows 用户环境变量，供后续启动自动复用。
+     *
+     * @param directory 已通过目录边界校验的目录
+     */
+    private static void persistDirectory(Path directory) {
+        if (!System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            return;
+        }
+        try {
+            Process process = new ProcessBuilder("setx", DIRECTORY_ENVIRONMENT_VARIABLE, directory.toString())
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            if (!process.waitFor(10L, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                LOGGER.warn("保存允许目录环境变量超时：{}", directory);
+                return;
+            }
+            if (process.exitValue() != 0) {
+                LOGGER.warn("保存允许目录环境变量失败，退出码：{}，目录：{}", process.exitValue(), directory);
+                return;
+            }
+            LOGGER.info("允许目录已保存到当前用户环境变量：{}", directory);
+        } catch (IOException exception) {
+            LOGGER.warn("保存允许目录环境变量失败：{}", directory, exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("等待保存允许目录环境变量时被中断：{}", directory, exception);
         }
     }
 
@@ -233,6 +311,7 @@ public final class WindowsAgentCliApplication {
         System.out.println("参数：");
         System.out.println("  --directory <目录>  设置唯一允许操作的目录");
         System.out.println("  --help              显示帮助");
+        System.out.println("也可以配置用户环境变量 PERSONAL_ASSISTANT_DIRECTORY，启动时自动使用");
     }
 
     private static void printInteractiveHelp() {
@@ -240,7 +319,7 @@ public final class WindowsAgentCliApplication {
         System.out.println("  根据实时资料规划任务并写入文件");
         System.out.println("  创建 notes\today.txt 并写入今天的工作记录");
         System.out.println("  搜索资料并生成带来源的报告");
-        System.out.println("特殊命令：:help、:directory、:exit、:quit");
+        System.out.println("特殊命令：:help、:directory、:directory <新目录>、:exit、:quit");
     }
 
     private static void printInfo(String message) {
