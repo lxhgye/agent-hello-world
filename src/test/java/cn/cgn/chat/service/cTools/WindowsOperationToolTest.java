@@ -58,7 +58,7 @@ class WindowsOperationToolTest {
 
     @Test
     @DisplayName("应列出目录并按通配符递归搜索文件")
-    void shouldListDirectoryAndSearchFiles() {
+    void shouldListDirectoryAndSearchFiles() throws IOException {
         WindowsOperationTool tool = new WindowsOperationTool(temporaryDirectory);
         Path nestedDirectory = temporaryDirectory.resolve("嵌套目录");
         Path textFile = nestedDirectory.resolve("演示.txt");
@@ -72,8 +72,8 @@ class WindowsOperationToolTest {
         String searchResult = tool.searchFiles(temporaryDirectory.toString(), "*.txt");
 
         assertTrue(directoryResult.contains("嵌套目录"));
-        assertTrue(searchResult.contains(textFile.toString()));
-        assertFalse(searchResult.contains(logFile.toString()));
+        assertTrue(searchResult.contains(textFile.toRealPath().toString()));
+        assertFalse(searchResult.contains(logFile.toRealPath().toString()));
     }
 
     @Test
