@@ -110,3 +110,32 @@ java '-Dfile.encoding=UTF-8' -jar target\agent-hello-world-1.0-SNAPSHOT-all.jar
 - `PersonalAssistant-portable.zip`：包含运行时的便携版程序目录；
 
 推送到 `main` 分支或手动执行 GitHub Actions 后，可以在对应工作流的 Artifacts 中下载便携版。构建过程不需要 API Key，运行程序时再通过初始化脚本配置。
+
+## 本地生成和测试 Windows 便携版
+
+在 Windows、JDK 25 和 Maven 环境中执行以下命令。Maven 命令必须带项目约定的本地仓库参数：
+
+```powershell
+mvn -q -DskipTests package '-Dmaven.repo.local=D:\may\SZH\repository'
+$inputDirectory = 'target\jpackage-input-local'
+$portableDirectory = 'target\portable-local'
+New-Item -ItemType Directory -Force -Path $inputDirectory, $portableDirectory | Out-Null
+Copy-Item 'target\agent-hello-world-1.0-SNAPSHOT-all.jar' $inputDirectory -Force
+jpackage --type app-image --dest $portableDirectory `
+  --name PersonalAssistant --app-version 0.1.0 --vendor lxhgye `
+  --description '基于 LangChain4j 的个人 AI 助手' `
+  --input $inputDirectory --main-jar 'agent-hello-world-1.0-SNAPSHOT-all.jar' `
+  --main-class 'cn.cgn.chat.app.PersonalAssistantCliApplication' --win-console `
+  --java-options '--enable-native-access=ALL-UNNAMED' `
+  --java-options '-Dfile.encoding=UTF-8'
+```
+
+生成后直接测试帮助和环境变量目录读取：
+
+```powershell
+& '.\target\portable-local\PersonalAssistant\PersonalAssistant.exe' '--help'
+$env:PERSONAL_ASSISTANT_DIRECTORY = (Resolve-Path 'D:\AgentWorkspace').Path
+':exit' | & '.\target\portable-local\PersonalAssistant\PersonalAssistant.exe'
+```
+
+确认帮助正常显示、目录权限正确且退出码为 `0` 后，再提交并推送到 GitHub。完整任务测试仍需要配置 `DEEPSEEK_API_KEY`、`SEARCH_API_KEY`，并注意会消耗模型和搜索服务额度。

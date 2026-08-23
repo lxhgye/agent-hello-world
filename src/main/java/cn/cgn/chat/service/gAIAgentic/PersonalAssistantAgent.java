@@ -53,6 +53,7 @@ public final class PersonalAssistantAgent {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PersonalAssistantAgent.class);
     private static final int MAXIMUM_AGENT_INVOCATIONS = 10;
+    private static final int MAXIMUM_DEVICE_TOOL_CALLING_ROUND_TRIPS = 20;
     private static final String REQUEST_KEY = "request";
     private static final String RESEARCH_RESULT_KEY = "researchResult";
     private static final String DEVICE_OPERATION_RESULT_KEY = "deviceOperationResult";
@@ -109,7 +110,9 @@ public final class PersonalAssistantAgent {
             允许操作的唯一目录是：%s
             文件查询、搜索、读取、统计、创建、写入、追加、复制、移动和删除必须限制在该目录及其子目录内。
             普通 UTF-8 文本文件使用 readTextFile；PDF、Word、Excel 等文档必须使用 readDocumentFile，不得把二进制文件当作 UTF-8 文本读取。
-            readDocumentFile 使用 LangChain4j Apache Tika 解析器；如果工具明确提示扫描件或图片型 PDF，需要说明当前缺少 OCR，不能虚构提取结果。
+            批量查找文档内容时必须使用 searchReadableDocuments；该工具会自动过滤没有文字层的图形或扫描 PDF，并返回过滤数量，不要用 searchFiles 得到 PDF 清单后逐个猜测 OCR 方案。
+            readDocumentFile 使用 LangChain4j Apache Tika 解析器；如果工具返回“已过滤图形或扫描 PDF”，将其视为正常跳过结果，不得再次读取不存在的 OCR 输出文件。
+            不得为了解析文档创建 Python、Shell 或其他临时脚本，不得启动 Python、cmd.exe、PowerShell、Tesseract、LibreOffice、Pandoc 或其他外部 OCR/转换程序进行能力探测。
             还可以查询进程、启动程序，以及关闭由当前工具启动并跟踪的程序。
             应按任务实际需要选择工具，不得把每个任务都解释成文件写入任务。
             统计和查询必须依据工具真实返回值；操作完成后返回真实工具结果，禁止虚构成功。
@@ -332,7 +335,8 @@ public final class PersonalAssistantAgent {
             } else if (context.agentServiceClass() == PersonalDeviceAgent.class) {
                 context.agentBuilder()
                         .systemMessage(DEVICE_SYSTEM_MESSAGE_TEMPLATE.formatted(this.allowedDirectory))
-                        .tools(operationTool);
+                        .tools(operationTool)
+                        .maxToolCallingRoundTrips(MAXIMUM_DEVICE_TOOL_CALLING_ROUND_TRIPS);
             } else if (context.agentServiceClass() == GeneralAnswerAgent.class) {
                 context.agentBuilder().systemMessage(GENERAL_SYSTEM_MESSAGE);
             } else if (context.agentServiceClass() == ResultReviewAgent.class) {

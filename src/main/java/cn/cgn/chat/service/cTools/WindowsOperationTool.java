@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Predicate;
@@ -109,6 +110,56 @@ public final class WindowsOperationTool {
     }
 
     /**
+     * 递归搜索可读取文档，并自动过滤没有文字层的图形 PDF。
+     *
+     * @param rootDirectoryPath 允许目录范围内的搜索根目录绝对路径
+     * @param fileNameGlob 文件名 glob 表达式，例如 *.pdf 或 *演习*
+     * @return 可读取文档路径和被过滤的图形 PDF 数量
+     */
+    @Tool("在允许目录范围内递归搜索可读取文档；对 PDF 自动排除没有文字层的扫描件或图形 PDF，并返回过滤数量，不要为过滤的 PDF 启动外部 OCR 程序")
+    public String searchReadableDocuments(
+            @P(name = "rootDirectoryPath", description = "允许目录范围内的搜索根目录绝对路径")
+            String rootDirectoryPath,
+            @P(name = "fileNameGlob", description = "文档文件名 glob 通配符，例如 *.pdf、*.docx 或 *演习*")
+            String fileNameGlob) {
+        Path rootDirectory = resolveExistingPath(
+                rootDirectoryPath, Files::isDirectory, "搜索根目录不存在或不是目录");
+        if (fileNameGlob == null || fileNameGlob.isBlank()) {
+            throw new IllegalArgumentException("文件名通配符不能为空");
+        }
+        try {
+            var matcher = rootDirectory.getFileSystem().getPathMatcher("glob:" + fileNameGlob);
+            List<String> readableMatches = new ArrayList<>();
+            int filteredPdfCount = 0;
+            try (var pathStream = Files.walk(rootDirectory)) {
+                for (Path path : pathStream
+                        .filter(candidate -> !Files.isSymbolicLink(candidate))
+                        .filter(candidate -> Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS))
+                        .filter(candidate -> matcher.matches(candidate.getFileName()))
+                        .sorted(Comparator.comparing(Path::toString, String.CASE_INSENSITIVE_ORDER))
+                        .toList()) {
+                    if (isPdf(path) && !hasExtractableText(path)) {
+                        filteredPdfCount++;
+                    } else {
+                        readableMatches.add(path.toAbsolutePath().normalize().toString());
+                    }
+                }
+            }
+            StringBuilder result = new StringBuilder("可读取文档数量：")
+                    .append(readableMatches.size());
+            if (filteredPdfCount > 0) {
+                result.append("；已过滤无文字层 PDF：").append(filteredPdfCount).append(" 个");
+            }
+            if (!readableMatches.isEmpty()) {
+                result.append(System.lineSeparator()).append(String.join(System.lineSeparator(), readableMatches));
+            }
+            return result.toString();
+        } catch (IOException | IllegalArgumentException exception) {
+            throw new IllegalStateException("搜索可读取文档失败：" + rootDirectory, exception);
+        }
+    }
+
+    /**
      * 读取 UTF-8 文本文件。
      *
      * @param filePath 文件绝对路径
@@ -143,11 +194,11 @@ public final class WindowsOperationTool {
             Document document = new ApacheTikaDocumentParser().parse(inputStream);
             String text = document.text() == null ? "" : document.text().trim();
             if (text.isEmpty()) {
-                return "文档未提取到可选文本，可能是扫描件或图片型 PDF，需要 OCR。文件：" + file;
+                return "已过滤图形或扫描 PDF：没有可提取文字层，未启动外部 OCR。文件：" + file;
             }
             return text;
         } catch (BlankDocumentException exception) {
-            return "文档未提取到可选文本，可能是扫描件或图片型 PDF，需要 OCR。文件：" + file;
+            return "已过滤图形或扫描 PDF：没有可提取文字层，未启动外部 OCR。文件：" + file;
         } catch (IOException | RuntimeException exception) {
             throw new IllegalStateException("读取文档失败：" + file, exception);
         }
@@ -408,6 +459,19 @@ public final class WindowsOperationTool {
             return realPath;
         } catch (IOException exception) {
             throw new IllegalArgumentException(errorMessage + "：" + path, exception);
+        }
+    }
+
+    private boolean isPdf(Path path) {
+        return path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".pdf");
+    }
+
+    private boolean hasExtractableText(Path file) {
+        try (var inputStream = Files.newInputStream(file)) {
+            Document document = new ApacheTikaDocumentParser().parse(inputStream);
+            return document.text() != null && !document.text().trim().isEmpty();
+        } catch (IOException | RuntimeException exception) {
+            return false;
         }
     }
 

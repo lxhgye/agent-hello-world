@@ -99,8 +99,8 @@ class WindowsOperationToolTest {
     }
 
     @Test
-    @DisplayName("没有文字层的 PDF 应返回 OCR 提示而不是工具异常")
-    void shouldReturnOcrHintForBlankPdf() throws IOException {
+    @DisplayName("没有文字层的 PDF 应返回过滤提示而不是工具异常")
+    void shouldReturnFilteredHintForBlankPdf() throws IOException {
         WindowsOperationTool tool = new WindowsOperationTool(temporaryDirectory);
         Path pdfFile = temporaryDirectory.resolve("图片型文档.pdf");
         try (PDDocument document = new PDDocument()) {
@@ -109,7 +109,37 @@ class WindowsOperationToolTest {
         }
 
         String content = tool.readDocumentFile(pdfFile.toString());
-        assertTrue(content.contains("需要 OCR"));
+        assertTrue(content.contains("已过滤图形或扫描 PDF"));
+    }
+
+    @Test
+    @DisplayName("搜索可读取文档时应过滤没有文字层的 PDF")
+    void shouldFilterImageOnlyPdfWhenSearchingReadableDocuments() throws IOException {
+        WindowsOperationTool tool = new WindowsOperationTool(temporaryDirectory);
+        Path textPdf = temporaryDirectory.resolve("文字文档.pdf");
+        Path imagePdf = temporaryDirectory.resolve("图片文档.pdf");
+        try (PDDocument document = new PDDocument()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream contentStream = new PDPageContentStream(document, page)) {
+                contentStream.beginText();
+                contentStream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                contentStream.newLineAtOffset(72, 720);
+                contentStream.showText("readable PDF");
+                contentStream.endText();
+            }
+            document.save(textPdf.toFile());
+        }
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            document.save(imagePdf.toFile());
+        }
+
+        String result = tool.searchReadableDocuments(temporaryDirectory.toString(), "*.pdf");
+
+        assertTrue(result.contains(textPdf.toRealPath().toString()));
+        assertFalse(result.contains(imagePdf.toRealPath().toString()));
+        assertTrue(result.contains("已过滤无文字层 PDF：1 个"));
     }
 
     @Test
