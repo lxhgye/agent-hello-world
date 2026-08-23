@@ -5,16 +5,20 @@ import cn.cgn.chat.service.gAIAgentic.PersonalAssistantAgent;
 import java.io.Console;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import org.fusesource.jansi.AnsiConsole;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 个人 AI 助手命令行启动程序，负责收集交互信息并持续处理通用任务。
@@ -42,6 +46,11 @@ public final class WindowsAgentCliApplication {
     private static final String ANSI_RED = "\u001B[31m";
     private static final String ANSI_BLUE = "\u001B[94m";
     private static final long STATUS_REFRESH_MILLISECONDS = 1_000L;
+    private static final String WINDOWS_PLATFORM_MARKER = "win";
+    private static final String UTF8_CONSOLE_CODE_PAGE = "65001";
+    private static final String COMMAND_DISABLE_AUTO_RUN = "/d";
+    private static final String COMMAND_EXECUTE = "/c";
+    private static final String COMMAND_SUPPRESS_OUTPUT = " > nul";
     private static final String VERSION = "0.1.0";
     private static final AtomicBoolean FINAL_ANSWER_STREAMED = new AtomicBoolean();
     private static final AtomicBoolean TOOL_STATUS_RUNNING = new AtomicBoolean();
@@ -49,6 +58,7 @@ public final class WindowsAgentCliApplication {
     /** 当前工具状态提示的开始时间；使用原子长整型避免空值拆箱异常。 */
     private static final AtomicLong TOOL_STATUS_START_NANOS = new AtomicLong();
     private static final Object OUTPUT_LOCK = new Object();
+    private static final Logger LOGGER = LoggerFactory.getLogger(WindowsAgentCliApplication.class);
     // CLI 通过 Jansi 负责适配终端；即使从 IDE 启动，也保留 ANSI 样式交给 Jansi 处理。
     private static final MarkdownTerminalRenderer MARKDOWN_RENDERER = new MarkdownTerminalRenderer(true);
 
@@ -88,8 +98,38 @@ public final class WindowsAgentCliApplication {
     }
 
     private static void configureUtf8Output() {
+        configureWindowsConsoleCodePage();
         System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8));
         System.setErr(new PrintStream(new FileOutputStream(FileDescriptor.err), true, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 将 Windows 控制台切换为 UTF-8 代码页，保证直接启动 EXE 时中文输出不乱码。
+     *
+     * <p>通过 start.bat 启动时通常已经执行过 chcp 65001；这里再次设置是为了覆盖用户
+     * 直接双击 jpackage 生成的 EXE 或从默认代码页终端启动的场景。</p>
+     */
+    private static void configureWindowsConsoleCodePage() {
+        String operatingSystem = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (!operatingSystem.contains(WINDOWS_PLATFORM_MARKER)) {
+            return;
+        }
+        try {
+            Process process = new ProcessBuilder("cmd.exe", COMMAND_DISABLE_AUTO_RUN, COMMAND_EXECUTE,
+                    "chcp " + UTF8_CONSOLE_CODE_PAGE + COMMAND_SUPPRESS_OUTPUT)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                LOGGER.warn("切换 Windows 控制台 UTF-8 代码页失败，退出码：{}", exitCode);
+            }
+        } catch (IOException exception) {
+            LOGGER.warn("无法启动 Windows 控制台代码页设置命令，继续使用默认代码页。", exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("等待 Windows 控制台代码页设置命令时被中断。", exception);
+        }
     }
 
     private static void runInteractiveLoop(PersonalAssistantAgent agent) {
