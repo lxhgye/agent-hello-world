@@ -126,6 +126,7 @@ jpackage --type app-image --dest $portableDirectory `
   --description '基于 LangChain4j 的个人 AI 助手' `
   --input $inputDirectory --main-jar 'agent-hello-world-1.0-SNAPSHOT-all.jar' `
   --main-class 'cn.cgn.chat.app.PersonalAssistantCliApplication' --win-console `
+  --add-modules java.se,jdk.charsets `
   --java-options '--enable-native-access=ALL-UNNAMED' `
   --java-options '-Dfile.encoding=UTF-8'
 ```
