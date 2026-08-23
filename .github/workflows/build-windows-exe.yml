@@ -76,9 +76,7 @@ jobs:
               '--main-class', 'cn.cgn.chat.app.PersonalAssistantCliApplication',
               '--win-console',
               '--java-options', '--enable-native-access=ALL-UNNAMED',
-              '--java-options', '-Dfile.encoding=UTF-8',
-              '--java-options', '-Dsun.stdout.encoding=UTF-8',
-              '--java-options', '-Dsun.stderr.encoding=UTF-8'
+              '--java-options', '-Dfile.encoding=UTF-8'
           )
 
           jpackage --type app-image --dest $portableDirectory @commonArguments
