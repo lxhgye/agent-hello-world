@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Tika 对缺失的可选外部工具仅进行能力探测，降低其探测堆栈的日志噪声。 -->
+    <logger name="org.apache.tika.parser.external.ExternalParser" level="WARN"/>
+    <!-- 原始模型 HTTP 报文可能包含长文本和敏感信息，只保留 Agent 过程日志。 -->
+    <logger name="dev.langchain4j.http.client.log.LoggingHttpClient" level="WARN"/>
+    <!-- 第三方 WebSearchTool 的参数缺少运行时名称，无法在业务代码中修改，避免重复刷屏。 -->
+    <logger name="dev.langchain4j.agent.tool.ToolSpecifications" level="ERROR"/>
+    <!-- Planner 的内部调用明细由业务监听器以中文审计事件输出，避免第三方英文对象日志混入交互。 -->
+    <logger name="dev.langchain4j.agentic.supervisor.SupervisorPlanner" level="WARN"/>
+
+    <appender name="文件" class="ch.qos.logback.core.FileAppender">
+        <file>logs/personal-assistant.log</file>
+        <append>true</append>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="cn.cgn.chat" level="DEBUG"/>
+
+    <root level="INFO">
+        <appender-ref ref="文件"/>
+    </root>
+</configuration>

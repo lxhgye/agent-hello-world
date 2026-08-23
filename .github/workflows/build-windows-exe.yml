@@ -1,0 +1,96 @@
+name: 构建 Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    name: 构建 Windows 安装包
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: 缓存 Maven 依赖
+        uses: actions/cache@v4
+        with:
+          path: D:\may\SZH\repository
+          key: windows-maven-${{ hashFiles('pom.xml') }}
+          restore-keys: |
+            windows-maven-
+
+      - name: 测试并构建 fat jar
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path 'D:\may\SZH\repository' | Out-Null
+          mvn -B clean package '-Dmaven.repo.local=D:\may\SZH\repository'
+
+      - name: 安装 WiX Toolset
+        shell: powershell
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+              choco install wixtoolset --yes --no-progress
+          }
+          $wixDirectory = Get-ChildItem ${env:ProgramFiles(x86)} -Directory -Filter 'WiX Toolset*' |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 1
+          if ($null -eq $wixDirectory) {
+              throw '没有找到 WiX Toolset 安装目录。'
+          }
+          $wixBinDirectory = Join-Path $wixDirectory.FullName 'bin'
+          $wixBinDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: 生成便携版和 EXE 安装包
+        shell: powershell
+        run: |
+          $inputDirectory = 'target\jpackage-input'
+          $portableDirectory = 'target\portable'
+          $installerDirectory = 'target\installer'
+          New-Item -ItemType Directory -Force -Path $inputDirectory | Out-Null
+          Copy-Item 'target\agent-hello-world-1.0-SNAPSHOT-all.jar' $inputDirectory
+
+          $commonArguments = @(
+              '--name', 'PersonalAssistant',
+              '--app-version', '0.1.0',
+              '--vendor', 'lxhgye',
+              '--description', '基于 LangChain4j 的个人 AI 助手',
+              '--input', $inputDirectory,
+              '--main-jar', 'agent-hello-world-1.0-SNAPSHOT-all.jar',
+              '--main-class', 'cn.cgn.chat.app.PersonalAssistantCliApplication',
+              '--win-console',
+              '--java-options', '--enable-native-access=ALL-UNNAMED',
+              '--java-options', '-Dfile.encoding=UTF-8',
+              '--java-options', '-Dsun.stdout.encoding=UTF-8',
+              '--java-options', '-Dsun.stderr.encoding=UTF-8'
+          )
+
+          jpackage --type app-image --dest $portableDirectory @commonArguments
+          Compress-Archive -Path "$portableDirectory\PersonalAssistant" `
+              -DestinationPath 'target\PersonalAssistant-portable.zip'
+
+          jpackage --type exe --dest $installerDirectory @commonArguments `
+              --win-menu --win-shortcut --win-dir-chooser --win-per-user-install
+
+      - name: 上传 Windows 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonalAssistant-Windows
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            target/PersonalAssistant-portable.zip
+            target/installer/*.exe
