@@ -1,4 +1,4 @@
-name: 构建 Windows EXE
+name: 构建 Windows 便携版
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-windows-exe:
-    name: 构建 Windows 安装包
+    name: 构建 Windows 便携版
     runs-on: windows-latest
     timeout-minutes: 30
 
@@ -39,30 +39,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path 'D:\may\SZH\repository' | Out-Null
           mvn -B clean package -DskipTests '-Dmaven.repo.local=D:\may\SZH\repository'
 
-      - name: 安装 WiX Toolset
-        shell: pwsh
-        run: |
-          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
-              choco install wixtoolset --yes --no-progress
-          }
-          $wixDirectory = Get-ChildItem -Path 'C:\Program Files (x86)' -Directory -Filter 'WiX Toolset*' |
-              Sort-Object LastWriteTime -Descending |
-              Select-Object -First 1
-          if ($null -eq $wixDirectory) {
-              throw '没有找到 WiX Toolset 安装目录。'
-          }
-          $wixBinDirectory = Join-Path -Path $wixDirectory.FullName -ChildPath 'bin'
-          if (-not (Test-Path -LiteralPath $wixBinDirectory)) {
-              throw "没有找到 WiX Toolset 的 bin 目录：$wixBinDirectory"
-          }
-          Out-File -FilePath $env:GITHUB_PATH -InputObject $wixBinDirectory -Encoding utf8 -Append
-
-      - name: 生成便携版和 EXE 安装包
+      - name: 生成 Windows 便携版
         shell: pwsh
         run: |
           $inputDirectory = 'target\jpackage-input'
           $portableDirectory = 'target\portable'
-          $installerDirectory = 'target\installer'
           New-Item -ItemType Directory -Force -Path $inputDirectory | Out-Null
           Copy-Item 'target\agent-hello-world-1.0-SNAPSHOT-all.jar' $inputDirectory
 
@@ -83,9 +64,6 @@ jobs:
           Compress-Archive -Path "$portableDirectory\PersonalAssistant" `
               -DestinationPath 'target\PersonalAssistant-portable.zip'
 
-          jpackage --type exe --dest $installerDirectory @commonArguments `
-              --win-menu --win-shortcut --win-dir-chooser --win-per-user-install
-
       - name: 上传 Windows 构建产物
         uses: actions/upload-artifact@v4
         with:
@@ -94,4 +72,3 @@ jobs:
           retention-days: 14
           path: |
             target/PersonalAssistant-portable.zip
-            target/installer/*.exe
