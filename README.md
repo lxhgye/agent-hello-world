@@ -5,7 +5,7 @@
 在项目根目录执行：
 
 ```powershell
-mvn -q package '-Dmaven.repo.local=D:\may\SZH\repository'
+mvn -q package
 ```
 
 构建产物：
