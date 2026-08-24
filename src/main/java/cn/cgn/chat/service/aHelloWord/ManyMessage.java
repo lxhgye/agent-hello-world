@@ -9,7 +9,7 @@ import static cn.cgn.chat.config.ModelConfig.model;
 public class ManyMessage {
 
     public static void manyMessage(OpenAiChatModel model) {
-        UserMessage firstUserMessage = UserMessage.from("你好，我这里是数字孪生部。");
+        UserMessage firstUserMessage = UserMessage.from("你好，我正在龙岗天安数码城进行智能体开发演示。");
         AiMessage firstAIMessage = model.chat(firstUserMessage).aiMessage();
         System.out.println(firstAIMessage.text());
         UserMessage secondUserMassage = UserMessage.from("我在哪里？");

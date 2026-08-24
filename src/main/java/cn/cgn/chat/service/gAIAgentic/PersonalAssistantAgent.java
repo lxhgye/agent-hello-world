@@ -35,7 +35,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -48,33 +47,25 @@ import static cn.cgn.chat.config.ModelConfig.webTool;
 /**
  * 通用个人助手入口，使用 Agentic Supervisor 内置 Planner 动态调度能力 Agent。
  * Windows 工具只是当前接入的一组个人设备能力，不决定助手的业务身份。
+ * 用户请求
+ *   ↓
+ * streamTaskPlan()
+ *   ↓
+ * streamModel 生成“公开任务计划”，流式显示给用户
+ *   ↓
+ * 把公开计划作为上下文文本传给 Supervisor
+ *   ↓
+ * PersonalAssistantSupervisor 内部 Planner 再次规划
+ *   ↓
+ * 选择 GeneralAnswerAgent、WebResearchAgent、PersonalDeviceAgent 等
+ *   ↓
+ * 执行任务并整合结果
+ *   ↓
+ * streamFinalAnswer()
  */
 public final class PersonalAssistantAgent {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(PersonalAssistantAgent.class);
-    private static final int MAXIMUM_AGENT_INVOCATIONS = 10;
-    private static final int MAXIMUM_DEVICE_TOOL_CALLING_ROUND_TRIPS = 20;
-    private static final String REQUEST_KEY = "request";
-    private static final String RESEARCH_RESULT_KEY = "researchResult";
-    private static final String DEVICE_OPERATION_RESULT_KEY = "deviceOperationResult";
-    private static final String GENERAL_ANSWER_KEY = "generalAnswer";
-    private static final String REVIEW_RESULT_KEY = "reviewResult";
-    private static final int MAXIMUM_LOG_TEXT_LENGTH = 500;
-    private static final int MAXIMUM_FRONTEND_TOOL_DETAIL_LENGTH = 220;
-    private static final long PLAN_STREAM_TIMEOUT_SECONDS = 120L;
-    private static final String PLAN_STREAM_PREFIX = "\u0000P";
-    private static final String ANSWER_START_PREFIX = "\u0000S";
-    private static final String ANSWER_STREAM_PREFIX = "\u0000A";
-    private static final String TOOL_STATUS_START_PREFIX = "\u0000W";
-    private static final String TOOL_STATUS_END_PREFIX = "\u0000E";
-    private static final String AGENT_STAGE_PREFIX = "\u0000G";
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s\\]\\)>\\\"']+");
-    private static final Pattern QUERY_ARGUMENT_PATTERN = Pattern.compile(
-            "\\\"(?:query|q|arg0)\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"\\\\])*)\\\"",
-            Pattern.CASE_INSENSITIVE);
-    private static final Pattern SENSITIVE_ARGUMENT_PATTERN = Pattern.compile(
-            "(\\\"(?:content|text|contents|data)\\\"\\s*:\\s*\\\")(.*?)(\\\")(?=\\s*[,}])",
-            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final ThreadLocal<Consumer<String>> ACTIVE_PROGRESS_CONSUMER = new ThreadLocal<>();
 
     private static final String SUPERVISOR_CONTEXT = """
@@ -190,9 +181,9 @@ public final class PersonalAssistantAgent {
             initializeSupervisor();
             request = request + System.lineSeparator()
                     + "用户已看到的初始任务计划：" + System.lineSeparator() + plan;
-            progress(TOOL_STATUS_START_PREFIX + "正在整合各阶段结果……");
+            progress(PersonalAssistantConfig.TOOL_STATUS_START_PREFIX + "正在整合各阶段结果……");
             ResultWithAgenticScope<String> result = supervisor.executeWithAgenticScope(request);
-            progress(TOOL_STATUS_END_PREFIX + "任务执行阶段已完成");
+            progress(PersonalAssistantConfig.TOOL_STATUS_END_PREFIX + "任务执行阶段已完成");
             String answer = appendSources(result.result(), result.agenticScope());
             answer = streamFinalAnswer(userInstruction, answer);
             LOGGER.info("个人助手最终结果：{}", summarizeForLog(answer));
@@ -217,7 +208,7 @@ public final class PersonalAssistantAgent {
                         return;
                     }
                     plan.append(partialResponse);
-                    progressConsumer.accept(PLAN_STREAM_PREFIX + partialResponse);
+                    progressConsumer.accept(PersonalAssistantConfig.PLAN_STREAM_PREFIX + partialResponse);
                 }
 
                 @Override
@@ -236,7 +227,7 @@ public final class PersonalAssistantAgent {
             completed.countDown();
         }
         try {
-            if (!completed.await(PLAN_STREAM_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            if (!completed.await(PersonalAssistantConfig.PLAN_STREAM_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 failure.set(new IllegalStateException("任务规划流式响应超时"));
             }
         } catch (InterruptedException exception) {
@@ -247,11 +238,11 @@ public final class PersonalAssistantAgent {
         if (planFailure != null || plan.isEmpty()) {
             LOGGER.warn("任务规划流式生成失败，将使用通用计划继续执行", planFailure);
             String fallbackPlan = buildFallbackPlan(userInstruction);
-            progressConsumer.accept(PLAN_STREAM_PREFIX + fallbackPlan);
-            progressConsumer.accept(PLAN_STREAM_PREFIX + System.lineSeparator());
+            progressConsumer.accept(PersonalAssistantConfig.PLAN_STREAM_PREFIX + fallbackPlan);
+            progressConsumer.accept(PersonalAssistantConfig.PLAN_STREAM_PREFIX + System.lineSeparator());
             return fallbackPlan;
         }
-        progressConsumer.accept(PLAN_STREAM_PREFIX + System.lineSeparator());
+        progressConsumer.accept(PersonalAssistantConfig.PLAN_STREAM_PREFIX + System.lineSeparator());
         LOGGER.info("任务规划生成完成：{}", summarizeForLog(plan.toString()));
         return plan.toString();
     }
@@ -270,7 +261,7 @@ public final class PersonalAssistantAgent {
         StringBuilder streamedAnswer = new StringBuilder();
         CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        progressConsumer.accept(ANSWER_START_PREFIX);
+        progressConsumer.accept(PersonalAssistantConfig.ANSWER_START_PREFIX);
         try {
             streamModel.chat(prompt, new StreamingChatResponseHandler() {
                 @Override
@@ -279,7 +270,7 @@ public final class PersonalAssistantAgent {
                         return;
                     }
                     streamedAnswer.append(partialResponse);
-                    progressConsumer.accept(ANSWER_STREAM_PREFIX + partialResponse);
+                    progressConsumer.accept(PersonalAssistantConfig.ANSWER_STREAM_PREFIX + partialResponse);
                 }
 
                 @Override
@@ -298,7 +289,7 @@ public final class PersonalAssistantAgent {
             completed.countDown();
         }
         try {
-            if (!completed.await(PLAN_STREAM_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            if (!completed.await(PersonalAssistantConfig.PLAN_STREAM_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 failure.set(new IllegalStateException("最终答复流式响应超时"));
             }
         } catch (InterruptedException exception) {
@@ -309,7 +300,7 @@ public final class PersonalAssistantAgent {
             LOGGER.warn("最终答复流式生成失败，返回 Supervisor 结果", failure.get());
             return answer;
         }
-        progressConsumer.accept(ANSWER_STREAM_PREFIX + System.lineSeparator());
+        progressConsumer.accept(PersonalAssistantConfig.ANSWER_STREAM_PREFIX + System.lineSeparator());
         return streamedAnswer.toString().trim();
     }
 
@@ -336,7 +327,7 @@ public final class PersonalAssistantAgent {
                 context.agentBuilder()
                         .systemMessage(DEVICE_SYSTEM_MESSAGE_TEMPLATE.formatted(this.allowedDirectory))
                         .tools(operationTool)
-                        .maxToolCallingRoundTrips(MAXIMUM_DEVICE_TOOL_CALLING_ROUND_TRIPS);
+                        .maxToolCallingRoundTrips(PersonalAssistantConfig.MAXIMUM_DEVICE_TOOL_CALLING_ROUND_TRIPS);
             } else if (context.agentServiceClass() == GeneralAnswerAgent.class) {
                 context.agentBuilder().systemMessage(GENERAL_SYSTEM_MESSAGE);
             } else if (context.agentServiceClass() == ResultReviewAgent.class) {
@@ -356,7 +347,7 @@ public final class PersonalAssistantAgent {
     private String appendSources(String answer, AgenticScope scope) {
         Set<String> sources = new LinkedHashSet<>();
         if (scope != null) {
-            collectSourcesFromState(scope.readState(RESEARCH_RESULT_KEY), sources);
+            collectSourcesFromState(scope.readState(PersonalAssistantConfig.RESEARCH_RESULT_KEY), sources);
             scope.agentInvocations().forEach(invocation -> collectSourcesFromState(invocation.output(), sources));
         }
         sources.addAll(observedSources);
@@ -380,7 +371,7 @@ public final class PersonalAssistantAgent {
         if (text == null || text.isBlank()) {
             return;
         }
-        Matcher matcher = URL_PATTERN.matcher(text);
+        Matcher matcher = PersonalAssistantConfig.URL_PATTERN.matcher(text);
         while (matcher.find()) {
             sources.add(matcher.group());
         }
@@ -404,9 +395,9 @@ public final class PersonalAssistantAgent {
             return "null";
         }
         String normalized = value.replaceAll("\\s+", " ").trim();
-        return normalized.length() <= MAXIMUM_LOG_TEXT_LENGTH
+        return normalized.length() <= PersonalAssistantConfig.MAXIMUM_LOG_TEXT_LENGTH
                 ? normalized
-                : normalized.substring(0, MAXIMUM_LOG_TEXT_LENGTH) + "...";
+                : normalized.substring(0, PersonalAssistantConfig.MAXIMUM_LOG_TEXT_LENGTH) + "...";
     }
 
     private Path resolveAllowedDirectory(Path directory) {
@@ -430,19 +421,19 @@ public final class PersonalAssistantAgent {
         @SupervisorAgent(
                 name = "personal-assistant-supervisor",
                 description = "动态协调网络研究、个人设备操作和结果审校，完成通用个人助手任务",
-                maxAgentsInvocations = MAXIMUM_AGENT_INVOCATIONS,
+                maxAgentsInvocations = PersonalAssistantConfig.MAXIMUM_AGENT_INVOCATIONS,
                 contextStrategy = SupervisorContextStrategy.SUMMARIZATION,
                 responseStrategy = SupervisorResponseStrategy.SUMMARY,
                 subAgents = {WebResearchAgent.class, PersonalDeviceAgent.class,
                         GeneralAnswerAgent.class, ResultReviewAgent.class})
-        String execute(@V(REQUEST_KEY) String request);
+        String execute(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
 
         /** 返回任务结果及本次执行的 Agentic Scope，供来源和审计信息提取。 */
-        ResultWithAgenticScope<String> executeWithAgenticScope(@V(REQUEST_KEY) String request);
+        ResultWithAgenticScope<String> executeWithAgenticScope(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
 
         /** 为框架内置 Planner 提供通用助手的协调约束。 */
         @SupervisorRequest
-        static String buildRequest(@V(REQUEST_KEY) String request) {
+        static String buildRequest(@V(PersonalAssistantConfig.REQUEST_KEY) String request) {
             return SUPERVISOR_CONTEXT + System.lineSeparator() + request;
         }
 
@@ -459,14 +450,14 @@ public final class PersonalAssistantAgent {
         @Agent(
                 name = "web-research-agent",
                 description = "使用网络搜索获取实时资料、热门信息和来源链接",
-                outputKey = RESEARCH_RESULT_KEY)
+                outputKey = PersonalAssistantConfig.RESEARCH_RESULT_KEY)
         @UserMessage("""
                 用户任务和当前协调上下文如下：
                 {{request}}
 
                 请根据上下文执行网络研究，返回结构化 ResearchResult。
                 """)
-        ResearchResult research(@V(REQUEST_KEY) String request);
+        ResearchResult research(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
     }
 
     /** 个人设备能力 Agent。 */
@@ -475,14 +466,14 @@ public final class PersonalAssistantAgent {
         @Agent(
                 name = "personal-device-agent",
                 description = "仅在任务结果依赖用户本地设备状态或需要改变本地文件、目录、进程和程序时执行个人设备操作",
-                outputKey = DEVICE_OPERATION_RESULT_KEY)
+                outputKey = PersonalAssistantConfig.DEVICE_OPERATION_RESULT_KEY)
         @UserMessage("""
                 用户任务和当前协调上下文如下：
                 {{request}}
 
                 请先判断用户目标是否确实需要个人设备状态或设备变更；只有确实需要时才调用必要的 WindowsOperationTool，返回结构化 DeviceOperationResult。
                 """)
-        DeviceOperationResult execute(@V(REQUEST_KEY) String request);
+        DeviceOperationResult execute(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
     }
 
     /** 稳定知识和普通对话能力 Agent。 */
@@ -491,14 +482,14 @@ public final class PersonalAssistantAgent {
         @Agent(
                 name = "general-answer-agent",
                 description = "回答稳定知识、概念介绍和普通对话，不调用网络或个人设备工具",
-                outputKey = GENERAL_ANSWER_KEY)
+                outputKey = PersonalAssistantConfig.GENERAL_ANSWER_KEY)
         @UserMessage("""
                 用户任务和当前协调上下文如下：
                 {{request}}
 
                 请直接给出用户可读的中文回答，不要调用工具。
                 """)
-        String answer(@V(REQUEST_KEY) String request);
+        String answer(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
     }
 
     /** 结果审校能力 Agent。 */
@@ -507,14 +498,14 @@ public final class PersonalAssistantAgent {
         @Agent(
                 name = "result-review-agent",
                 description = "检查用户目标、搜索来源和个人设备真实结果，必要时提出修复意见",
-                outputKey = REVIEW_RESULT_KEY)
+                outputKey = PersonalAssistantConfig.REVIEW_RESULT_KEY)
         @UserMessage("""
                 用户任务和当前协调上下文如下：
                 {{request}}
 
                 请检查累计执行结果，返回结构化 ReviewResult；未完成时给出下一步修复建议。
                 """)
-        ReviewResult review(@V(REQUEST_KEY) String request);
+        ReviewResult review(@V(PersonalAssistantConfig.REQUEST_KEY) String request);
     }
 
     /** Agentic 过程监听器，只输出可审计阶段和工具名称。 */
@@ -536,7 +527,7 @@ public final class PersonalAssistantAgent {
         public void beforeAgentInvocation(AgentRequest request) {
             String stage = describeAgentStage(request.agentName());
             LOGGER.info("Agent 开始：{}，阶段：{}", request.agentName(), stage);
-            progressConsumer.accept(AGENT_STAGE_PREFIX + stage);
+            progressConsumer.accept(PersonalAssistantConfig.AGENT_STAGE_PREFIX + stage);
         }
 
         @Override
@@ -559,7 +550,7 @@ public final class PersonalAssistantAgent {
             String status = searchTool
                     ? "正在搜索：" + detail
                     : "正在调用工具：" + toolName + "（" + detail + "）";
-            progressConsumer.accept(TOOL_STATUS_START_PREFIX + status);
+            progressConsumer.accept(PersonalAssistantConfig.TOOL_STATUS_START_PREFIX + status);
         }
 
         @Override
@@ -577,8 +568,8 @@ public final class PersonalAssistantAgent {
             }
             LOGGER.debug("工具结果摘要：{}", resultSummary);
             toolResultConsumer.accept(result);
-            progressConsumer.accept(TOOL_STATUS_END_PREFIX + resultSummary);
-            progressConsumer.accept(TOOL_STATUS_START_PREFIX + "正在整合当前结果……");
+            progressConsumer.accept(PersonalAssistantConfig.TOOL_STATUS_END_PREFIX + resultSummary);
+            progressConsumer.accept(PersonalAssistantConfig.TOOL_STATUS_START_PREFIX + "正在整合当前结果……");
         }
 
         private boolean isSearchTool(String toolName) {
@@ -614,13 +605,13 @@ public final class PersonalAssistantAgent {
             return "无参数";
         }
         if (toolName != null && toolName.toLowerCase(Locale.ROOT).contains("search")) {
-            Matcher matcher = QUERY_ARGUMENT_PATTERN.matcher(arguments);
+            Matcher matcher = PersonalAssistantConfig.QUERY_ARGUMENT_PATTERN.matcher(arguments);
             if (matcher.find()) {
                 return truncateForFrontend(unescapeJsonText(matcher.group(1)));
             }
             return "关键词未识别（参数：" + truncateForFrontend(arguments) + "）";
         }
-        String sanitized = SENSITIVE_ARGUMENT_PATTERN.matcher(arguments)
+        String sanitized = PersonalAssistantConfig.SENSITIVE_ARGUMENT_PATTERN.matcher(arguments)
                 .replaceAll("$1[内容已隐藏]$3");
         return truncateForFrontend(sanitized);
     }
@@ -652,7 +643,7 @@ public final class PersonalAssistantAgent {
     }
 
     private static int countUrls(String text) {
-        Matcher matcher = URL_PATTERN.matcher(text);
+        Matcher matcher = PersonalAssistantConfig.URL_PATTERN.matcher(text);
         int count = 0;
         while (matcher.find()) {
             count++;
@@ -684,9 +675,9 @@ public final class PersonalAssistantAgent {
     private static String truncateForFrontend(String text) {
         String normalized = text == null ? "无" : text.replaceAll("\\p{Cntrl}", " ")
                 .replaceAll("\\s+", " ").trim();
-        return normalized.length() <= MAXIMUM_FRONTEND_TOOL_DETAIL_LENGTH
+        return normalized.length() <= PersonalAssistantConfig.MAXIMUM_FRONTEND_TOOL_DETAIL_LENGTH
                 ? normalized
-                : normalized.substring(0, MAXIMUM_FRONTEND_TOOL_DETAIL_LENGTH) + "…";
+                : normalized.substring(0, PersonalAssistantConfig.MAXIMUM_FRONTEND_TOOL_DETAIL_LENGTH) + "…";
     }
 
     private static String unescapeJsonText(String text) {

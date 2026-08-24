@@ -1,6 +1,7 @@
 package cn.cgn.chat.service.eSearchApiTool;
 
 import cn.cgn.chat.service.bAiService.AssistantService;
+import cn.cgn.chat.service.cTools.ToolSet;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 
@@ -24,19 +25,19 @@ public class WebSearchApiTool {
         AssistantService assistantService = AiServices.builder(AssistantService.class)
                 .chatModel(model)
                 .build();
-        String answer = assistantService.chat("我在深圳，我想知道这周末的天气，请帮我规划一个今年最火的出行计划");
+        String answer = assistantService.chat("我在深圳，我想知道这周末的天气");
         System.out.println(answer);
 
         //增加搜索引擎工具
-//        Assistant assistant = AiServices.builder(Assistant.class)
-//                .chatModel(model)
-//                .tools(webTool,new ToolSet())
-//                .build();
+        Assistant assistant = AiServices.builder(Assistant.class)
+                .chatModel(model)
+                .tools(webTool,new ToolSet())
+                .build();
         //不走搜索
 //        String searchAnswer = assistant.answer("西游记的作者是谁？");
 //        System.out.println(searchAnswer);
         //需要查询近期事件时
-//        String searchAnswer = assistant.answer("我在深圳，我想知道这周末的天气，请帮我规划一个今年最火的出行计划");
+//        String searchAnswer = assistant.answer("我在深圳，我想知道这周末的天气");
 //        System.out.println(searchAnswer);
 
 

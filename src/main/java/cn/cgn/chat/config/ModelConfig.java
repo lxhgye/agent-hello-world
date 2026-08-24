@@ -30,8 +30,8 @@ public class ModelConfig {
             .apiKey(API_KEY)
             .baseUrl(URL)
             .modelName(MODEL_NAME)
-            .logRequests(false)
-            .logResponses(false)
+            .logRequests(true)
+            .logResponses(true)
             .build();
 
     public static OpenAiStreamingChatModel streamModel = OpenAiStreamingChatModel.builder()

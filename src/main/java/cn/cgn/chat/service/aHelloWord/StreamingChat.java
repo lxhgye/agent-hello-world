@@ -10,12 +10,10 @@ public class StreamingChat {
     public static void streamingChat(OpenAiStreamingChatModel model) {
 
         String userMessage = "什么是中广核";
-
-
         model.chat(userMessage, new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(String partialResponse) {
-                System.out.println("onPartialResponse: " + partialResponse);
+                System.out.print(partialResponse);
             }
 
             @Override
@@ -35,7 +33,7 @@ public class StreamingChat {
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
-                System.out.println("onCompleteResponse: " + completeResponse);
+                System.out.println("\r\nonCompleteResponse: " + completeResponse.aiMessage().text());
             }
 
             @Override

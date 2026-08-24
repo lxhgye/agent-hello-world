@@ -42,6 +42,7 @@ public class ARAG {
     static void main() {
         //加载文档
         List<Document> documents = LoadDocument();
+        //演示处理结果
         documents.forEach(document -> {
             if ("放射性废物安全监督管理规定.html".equals(document.metadata().getString("file_name"))) {
                 System.out.println(document.text());
@@ -54,35 +55,44 @@ public class ARAG {
         InMemoryEmbeddingStore<TextSegment> embeddingStore = new InMemoryEmbeddingStore<>();
 //        //将文档分片转向量并存储向量库中
         /************默认向量模型***************/
-//        EmbeddingStoreIngestor.ingest(documents, embeddingStore);
-//        //将文档接入到LLM对话中
-//        AssistantService assistantService = AiServices.builder(AssistantService.class)
-//                .chatModel(model)
-//                .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
-//                .contentRetriever(EmbeddingStoreContentRetriever.from(embeddingStore))
-//                .build();
-        /************自定义向量模型***************/
-        EmbeddingModel embeddingModel = OpenAiEmbeddingModel.builder()
-                .baseUrl("http://192.168.128.6:9997/v1/embeddings")
-                .modelName("bge-m3")
-                .build();
-        EmbeddingStoreIngestor.builder()
-                .embeddingModel(embeddingModel)
-                .embeddingStore(embeddingStore).build().ingest(documents);
+        EmbeddingStoreIngestor.ingest(documents, embeddingStore);
+//        将文档接入到LLM对话中
         AssistantService assistantService = AiServices.builder(AssistantService.class)
                 .chatModel(model)
                 .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
                 .contentRetriever(EmbeddingStoreContentRetriever.from(embeddingStore))
                 .build();
 
+
+        /************自定义向量模型***************/
+//        EmbeddingModel embeddingModel = OpenAiEmbeddingModel.builder()
+//                .baseUrl("http://192.168.2.6:9997/v1")
+//                .modelName("bge-m3")
+//                .build();
+//        EmbeddingStoreContentRetriever contentRetriever =
+//                EmbeddingStoreContentRetriever.builder()
+//                        .embeddingModel(embeddingModel)
+//                        .embeddingStore(embeddingStore)
+//                        .build();
+
+//        AssistantService assistantService = AiServices.builder(AssistantService.class)
+//                .chatModel(model)
+//                .chatMemory(MessageWindowChatMemory.withMaxMessages(10))
+//                .contentRetriever(contentRetriever)
+//                .build();
+
+
+
+
+
+
         //对话对比
         AssistantService assistantService1 = AiServices.builder(AssistantService.class)
                 .chatModel(model)
                 .chatMemory(MessageWindowChatMemory.withMaxMessages(10)).build();
-//        System.out.println(assistantService1.chat("什么是放射性废物（radioactive waste）?"));
-        System.out.println(assistantService.chat("什么是放射性废物（radioactive waste）?"));
-//        System.out.println(assistantService1.chat("放射性核素与人类可接近的生物圈相隔离周期是多久?"));
-//        System.out.println(assistantService.chat("放射性核素与人类可接近的生物圈相隔离周期是多久?"));
+//        System.out.println("未引入知识库结果："+assistantService1.chat("什么是放射性废物（radioactive waste）?"));
+//        System.out.println("=====================================");
+//        System.out.println("引入知识库结果："+assistantService.chat("什么是放射性废物（radioactive waste）?"));
 
 
     }

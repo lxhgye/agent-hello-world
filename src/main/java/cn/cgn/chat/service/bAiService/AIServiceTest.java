@@ -11,7 +11,7 @@ import static cn.cgn.chat.config.ModelConfig.model;
 public class AIServiceTest {
 
     public static void aiServiceHelloWord( AssistantService assistantService){
-        String answer = assistantService.chat("你好，智能体");
+        String answer = assistantService.chat("Tell me who you are");
         System.out.println(answer);
     }
 
@@ -20,7 +20,7 @@ public class AIServiceTest {
         AIServiceTest.aiServiceHelloWord(assistantService);
 
         /**
-         * 现在，我们来看一个更复杂的例子强制让LLM用中文回复
+         *  系统提示词  现在，我们来看一个更复杂的例子强制让LLM用中文回复
          */
 //        SysMesService sysMesService = AiServices.builder(SysMesService.class).chatModel(model).build();
 //        System.out.println(sysMesService.chat("Tell me who you are?"));
